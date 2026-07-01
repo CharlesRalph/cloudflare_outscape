@@ -1,0 +1,28 @@
+name = "rezdy-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-06-14"
+compatibility_flags = ["nodejs_compat"]
+
+# -- Secrets (set via CLI, never committed) --
+# wrangler secret put REZDY_API_KEY
+# wrangler secret put ALLOWED_ORIGIN
+
+[vars]
+# Non-sensitive defaults — override per environment below
+REZDY_BASE_URL = "https://api.rezdy.com/v1"
+RATE_LIMIT_WINDOW_MS = "60000"
+RATE_LIMIT_MAX_REQUESTS = "60"
+
+# ---- Environments ----
+
+[env.staging]
+name = "rezdy-proxy-staging"
+
+[env.staging.vars]
+REZDY_BASE_URL = "https://api.rezdy-staging.com/v1"
+
+[env.production]
+name = "rezdy-proxy-production"
+
+[env.production.vars]
+REZDY_BASE_URL = "https://api.rezdy.com/v1"
