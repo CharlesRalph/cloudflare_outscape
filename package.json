@@ -8,7 +8,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "hono": "^4.4.0"
+    "hono": "^4.4.0",
+    "webflow-api": "^3.3.4"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240614.0",

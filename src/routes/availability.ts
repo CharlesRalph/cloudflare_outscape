@@ -161,6 +161,77 @@ availability.get("/products", async (c) => {
     }
 });
 
+availability.get("/product", async (c) => {
+    const {
+        productCode,
+        month,
+        minAvailability,
+    } = c.req.query();
+
+    if (!productCode) {
+        return c.json({error: "Missing required param: productCode."}, 400);
+    }
+
+    if (!productCodeFmt.test(productCode)) {
+        return c.json({error: "Invalid product code format."}, 400);
+    }
+
+    const window = getAvailabilityWindow(month);
+    if ("error" in window) {
+        return c.json({error: window.error}, 400);
+    }
+
+    const params: Record<string, string> = {
+        productCode,
+        startTimeLocal: window.startTimeLocal,
+        endTimeLocal: window.endTimeLocal,
+    };
+
+    if (minAvailability) {
+        const qty = parseInt(minAvailability, 10);
+        if (isNaN(qty) || qty < 1 || qty > 50) {
+            return c.json(
+                {error: "minAvailability must be a number between 1 and 50."},
+                400
+            );
+        }
+        params.minAvailability = String(qty);
+    }
+
+    try {
+        const client = new RezdyClient(c.env);
+        const data = await client.get("/availability", params);
+
+        return c.json({
+            productCode,
+            startTimeLocal: window.startTimeLocal,
+            endTimeLocal: window.endTimeLocal,
+            availability: data,
+        });
+    } catch (err) {
+        if (err instanceof RezdyError) {
+            if (err.status === 422) {
+                return c.json(
+                    {
+                        productCode,
+                        startTimeLocal: window.startTimeLocal,
+                        endTimeLocal: window.endTimeLocal,
+                        availability: {sessions: []},
+                    },
+                    200
+                );
+            }
+
+            return c.json(
+                {error: "Failed to fetch availability.", detail: err.body},
+                toStatusCode(err.status)
+            );
+        }
+
+        throw err;
+    }
+});
+
 availability.get("/", async (c) => {
     const {
         productCode,

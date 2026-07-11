@@ -1,75 +1,75 @@
-import { Hono } from "hono";
-import { RezdyClient, RezdyError } from "../rezdy-client";
+import {Hono} from "hono";
+import {RezdyClient, RezdyError} from "../rezdy-client";
 import type {
-  Env,
-  BookingCreate,
-  Quantity,
-  Extra,
-  BookingField,
-  Participant,
-  Customer,
-  CreditCard,
+    Env,
+    BookingCreate,
+    Quantity,
+    Extra,
+    BookingField,
+    Participant,
+    Customer,
+    CreditCard,
 } from "../types";
-import { toStatusCode } from "../types";
+import {toStatusCode} from "../types";
 
 const booking = new Hono<{ Bindings: Env }>();
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function validateQuantities(quantities: unknown): quantities is Quantity[] {
-  if (!Array.isArray(quantities) || quantities.length === 0) return false;
-  return quantities.every(
-    (q) =>
-      typeof q === "object" &&
-      q !== null &&
-      typeof (q as Quantity).optionLabel === "string" &&
-      (q as Quantity).optionLabel.length > 0 &&
-      typeof (q as Quantity).value === "number" &&
-      (q as Quantity).value >= 1
-  );
+    if (!Array.isArray(quantities) || quantities.length === 0) return false;
+    return quantities.every(
+        (q) =>
+            typeof q === "object" &&
+            q !== null &&
+            typeof (q as Quantity).optionLabel === "string" &&
+            (q as Quantity).optionLabel.length > 0 &&
+            typeof (q as Quantity).value === "number" &&
+            (q as Quantity).value >= 1
+    );
 }
 
 function validateCustomer(customer: unknown): customer is Customer {
-  if (typeof customer !== "object" || customer === null) return false;
-  const c = customer as Customer;
-  return (
-    typeof c.firstName === "string" && c.firstName.trim().length > 0 &&
-    typeof c.lastName === "string"  && c.lastName.trim().length > 0 &&
-    typeof c.email === "string"     && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)
-  );
+    if (typeof customer !== "object" || customer === null) return false;
+    const c = customer as Customer;
+    return (
+        typeof c.firstName === "string" && c.firstName.trim().length > 0 &&
+        typeof c.lastName === "string" && c.lastName.trim().length > 0 &&
+        typeof c.email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email)
+    );
 }
 
 function validateExtras(extras: unknown): extras is Extra[] {
-  if (!Array.isArray(extras)) return false;
-  return extras.every(
-    (e) =>
-      typeof e === "object" &&
-      e !== null &&
-      typeof (e as Extra).id === "number" &&          // spec: id (not extraId)
-      typeof (e as Extra).quantity === "number" &&
-      (e as Extra).quantity >= 1
-  );
+    if (!Array.isArray(extras)) return false;
+    return extras.every(
+        (e) =>
+            typeof e === "object" &&
+            e !== null &&
+            typeof (e as Extra).id === "number" &&          // spec: id (not extraId)
+            typeof (e as Extra).quantity === "number" &&
+            (e as Extra).quantity >= 1
+    );
 }
 
 function validateBookingFields(fields: unknown): fields is BookingField[] {
-  if (!Array.isArray(fields)) return false;
-  return fields.every(
-    (f) =>
-      typeof f === "object" &&
-      f !== null &&
-      typeof (f as BookingField).label === "string" &&
-      typeof (f as BookingField).value === "string"
-  );
+    if (!Array.isArray(fields)) return false;
+    return fields.every(
+        (f) =>
+            typeof f === "object" &&
+            f !== null &&
+            typeof (f as BookingField).label === "string" &&
+            typeof (f as BookingField).value === "string"
+    );
 }
 
 function validateParticipants(participants: unknown): participants is Participant[] {
-  if (!Array.isArray(participants)) return false;
-  return participants.every(
-    (p) =>
-      typeof p === "object" &&
-      p !== null &&
-      Array.isArray((p as Participant).fields)
-  );
+    if (!Array.isArray(participants)) return false;
+    return participants.every(
+        (p) =>
+            typeof p === "object" &&
+            p !== null &&
+            Array.isArray((p as Participant).fields)
+    );
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -105,242 +105,242 @@ function validateParticipants(participants: unknown): participants is Participan
  * }
  */
 booking.post("/", async (c) => {
-  let body: BookingCreate;
+    let body: BookingCreate;
 
-  try {
-    body = await c.req.json<BookingCreate>();
-  } catch {
-    return c.json({ error: "Invalid JSON body." }, 400);
-  }
-
-  const { status, customer, items, fields, comments, creditCard } = body;
-
-  // ── Status ──
-  if (status !== "PROCESSING" && status !== "CONFIRMED") {
-    return c.json(
-      { error: 'status must be "PROCESSING" or "CONFIRMED".' },
-      400
-    );
-  }
-
-  // ── Customer ──
-  if (!validateCustomer(customer)) {
-    return c.json(
-      {
-        error:
-          "customer must include valid firstName, lastName, and email.",
-      },
-      400
-    );
-  }
-
-  // ── Items ──
-  if (!Array.isArray(items) || items.length === 0) {
-    return c.json({ error: "items must be a non-empty array." }, 400);
-  }
-
-  for (const [i, item] of items.entries()) {
-    if (!item.productCode || !/^[A-Z0-9_-]{3,50}$/i.test(item.productCode)) {
-      return c.json(
-        { error: `items[${i}].productCode is missing or invalid.` },
-        400
-      );
+    try {
+        body = await c.req.json<BookingCreate>();
+    } catch {
+        return c.json({error: "Invalid JSON body."}, 400);
     }
 
-    // Require either local or ISO times
-    const hasLocalTimes = item.startTimeLocal && item.endTimeLocal;
-    const hasIsoTimes   = item.startTime && item.endTime;
-    if (!hasLocalTimes && !hasIsoTimes) {
-      return c.json(
-        {
-          error: `items[${i}] must include either startTimeLocal+endTimeLocal or startTime+endTime.`,
-        },
-        400
-      );
-    }
+    const {status, customer, items, fields, comments, creditCard} = body;
 
-    // Validate local time format if provided
-    const localTimeFmt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-    if (item.startTimeLocal && !localTimeFmt.test(item.startTimeLocal)) {
-      return c.json(
-        {
-          error: `items[${i}].startTimeLocal must be in format "yyyy-MM-dd HH:mm:ss".`,
-        },
-        400
-      );
-    }
-
-    if (!validateQuantities(item.quantities)) {
-      return c.json(
-        {
-          error: `items[${i}].quantities must be a non-empty array of { optionLabel, value } objects.`,
-        },
-        400
-      );
-    }
-
-    // Cap total guests
-    const totalGuests = item.quantities.reduce(
-      (sum, q) => sum + (q.value ?? 0),
-      0
-    );
-    if (totalGuests < 1 || totalGuests > 50) {
-      return c.json(
-        { error: `items[${i}] total guest count must be between 1 and 50.` },
-        400
-      );
-    }
-
-    if (item.extras !== undefined && !validateExtras(item.extras)) {
-      return c.json(
-        {
-          error: `items[${i}].extras must be an array of { id, quantity } objects.`,
-        },
-        400
-      );
-    }
-
-    if (item.participants !== undefined && !validateParticipants(item.participants)) {
-      return c.json(
-        {
-          error: `items[${i}].participants must be an array of { fields: [] } objects.`,
-        },
-        400
-      );
-    }
-  }
-
-  // ── Booking fields ──
-  if (fields !== undefined && !validateBookingFields(fields)) {
-    return c.json(
-      { error: "fields must be an array of { label, value } objects." },
-      400
-    );
-  }
-
-  // ── Credit card — only accepted for CONFIRMED, never for PROCESSING ──
-  if (status === "PROCESSING" && creditCard) {
-    return c.json(
-      { error: "Do not include creditCard for PROCESSING bookings." },
-      400
-    );
-  }
-
-  if (status === "CONFIRMED") {
-    if (!creditCard?.cardToken) {
-      return c.json(
-        {
-          error:
-            "creditCard.cardToken is required for CONFIRMED bookings. Generate it client-side via Stripe.js.",
-        },
-        400
-      );
-    }
-    // Extra safety: never forward raw card numbers
-    const raw = creditCard as Record<string, unknown>;
-    if (raw.cardNumber || raw.cardSecurityNumber) {
-      return c.json(
-        {
-          error:
-            "Raw card numbers are not accepted. Use Stripe.js to generate a cardToken client-side.",
-        },
-        400
-      );
-    }
-  }
-
-  // ── Build the Rezdy payload ──
-  const rezdyPayload: BookingCreate = {
-    status,
-    resellerReference: `outscape-${Date.now()}`,
-    customer: {
-      firstName: customer.firstName.trim(),
-      lastName:  customer.lastName.trim(),
-      email:     customer.email.trim().toLowerCase(),
-      phone:     customer.phone?.trim(),
-    },
-    items: items.map((item) => ({
-      productCode:    item.productCode,
-      startTimeLocal: item.startTimeLocal,
-      endTimeLocal:   item.endTimeLocal,
-      startTime:      item.startTime,
-      endTime:        item.endTime,
-      quantities:     item.quantities.map((q) => ({
-        optionLabel: q.optionLabel,   // exact spec field name
-        value:       q.value,
-        ...(q.optionPrice !== undefined && { optionPrice: q.optionPrice }),
-      })),
-      extras: (item.extras ?? []).map((e) => ({
-        id:       e.id,               // exact spec field name (not extraId)
-        quantity: e.quantity,
-      })),
-      participants: item.participants ?? [],
-    })),
-    fields:   fields ?? [],
-    comments: comments?.trim() ?? "",
-    sendNotifications: true,
-    ...(creditCard && {
-      creditCard: {
-        cardToken: creditCard.cardToken,
-        ...(creditCard.cardName && { cardName: creditCard.cardName }),
-      } satisfies CreditCard,
-    }),
-  };
-
-  try {
-    const client = new RezdyClient(c.env);
-    const data = await client.post<{
-      requestStatus?: { success: boolean; error?: string; errorMessage?: string };
-      booking?: {
-        orderNumber: string;
-        status: string;
-        totalAmount: number;
-        totalCurrency: string;
-        totalDue: number;
-      };
-    }>("/bookings", rezdyPayload);
-
-    if (!data?.requestStatus?.success) {
-      const detail =
-        data?.requestStatus?.errorMessage ??
-        data?.requestStatus?.error ??
-        "Unknown error";
-      return c.json({ error: "Rezdy rejected the booking.", detail }, 422);
-    }
-
-    const b = data.booking;
-    if (!b?.orderNumber) {
-      return c.json(
-        { error: "Booking created but no order number returned." },
-        500
-      );
-    }
-
-    return c.json({
-      orderNumber:   b.orderNumber,
-      status:        b.status,
-      totalAmount:   b.totalAmount,
-      totalCurrency: b.totalCurrency,
-      totalDue:      b.totalDue,
-    });
-  } catch (err) {
-    if (err instanceof RezdyError) {
-      if (err.status === 422) {
+    //Status
+    if (status !== "NEW" && status !== "PROCESSING" && status !== "CONFIRMED") {
         return c.json(
-          {
-            error:
-              "The selected session is no longer available. Please go back and choose another date.",
-          },
-          422
+            {error: 'status must be "NEW", "PROCESSING", or "CONFIRMED".'},
+            400
         );
-      }
-      return c.json(
-        { error: "Failed to create booking.", detail: err.body },
-        toStatusCode(err.status)
-      );
     }
-    throw err;
-  }
+
+    //Customer
+    if (!validateCustomer(customer)) {
+        return c.json(
+            {
+                error:
+                    "customer must include valid firstName, lastName, and email.",
+            },
+            400
+        );
+    }
+
+    // ── Items ──
+    if (!Array.isArray(items) || items.length === 0) {
+        return c.json({error: "items must be a non-empty array."}, 400);
+    }
+
+    for (const [i, item] of items.entries()) {
+        if (!item.productCode || !/^[A-Z0-9_-]{3,50}$/i.test(item.productCode)) {
+            return c.json(
+                {error: `items[${i}].productCode is missing or invalid.`},
+                400
+            );
+        }
+
+        // Require either local or ISO times
+        const hasLocalTimes = item.startTimeLocal && item.endTimeLocal;
+        const hasIsoTimes = item.startTime && item.endTime;
+        if (!hasLocalTimes && !hasIsoTimes) {
+            return c.json(
+                {
+                    error: `items[${i}] must include either startTimeLocal+endTimeLocal or startTime+endTime.`,
+                },
+                400
+            );
+        }
+
+        // Validate local time format if provided
+        const localTimeFmt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+        if (item.startTimeLocal && !localTimeFmt.test(item.startTimeLocal)) {
+            return c.json(
+                {
+                    error: `items[${i}].startTimeLocal must be in format "yyyy-MM-dd HH:mm:ss".`,
+                },
+                400
+            );
+        }
+
+        if (!validateQuantities(item.quantities)) {
+            return c.json(
+                {
+                    error: `items[${i}].quantities must be a non-empty array of { optionLabel, value } objects.`,
+                },
+                400
+            );
+        }
+
+        // Cap total guests
+        const totalGuests = item.quantities.reduce(
+            (sum, q) => sum + (q.value ?? 0),
+            0
+        );
+        if (totalGuests < 1 || totalGuests > 50) {
+            return c.json(
+                {error: `items[${i}] total guest count must be between 1 and 50.`},
+                400
+            );
+        }
+
+        if (item.extras !== undefined && !validateExtras(item.extras)) {
+            return c.json(
+                {
+                    error: `items[${i}].extras must be an array of { id, quantity } objects.`,
+                },
+                400
+            );
+        }
+
+        if (item.participants !== undefined && !validateParticipants(item.participants)) {
+            return c.json(
+                {
+                    error: `items[${i}].participants must be an array of { fields: [] } objects.`,
+                },
+                400
+            );
+        }
+    }
+
+    // ── Booking fields ──
+    if (fields !== undefined && !validateBookingFields(fields)) {
+        return c.json(
+            {error: "fields must be an array of { label, value } objects."},
+            400
+        );
+    }
+
+    // ── Credit card — only accepted for CONFIRMED, never for PROCESSING ──
+    if (status === "PROCESSING" && creditCard) {
+        return c.json(
+            {error: "Do not include creditCard for PROCESSING bookings."},
+            400
+        );
+    }
+
+    if (status === "CONFIRMED") {
+        if (!creditCard?.cardToken) {
+            return c.json(
+                {
+                    error:
+                        "creditCard.cardToken is required for CONFIRMED bookings. Generate it client-side via Stripe.js.",
+                },
+                400
+            );
+        }
+        // Extra safety: never forward raw card numbers
+        const raw = creditCard as Record<string, unknown>;
+        if (raw.cardNumber || raw.cardSecurityNumber) {
+            return c.json(
+                {
+                    error:
+                        "Raw card numbers are not accepted. Use Stripe.js to generate a cardToken client-side.",
+                },
+                400
+            );
+        }
+    }
+
+    // ── Build the Rezdy payload ──
+    const rezdyPayload: BookingCreate = {
+        status,
+        resellerReference: `outscape-${Date.now()}`,
+        customer: {
+            firstName: customer.firstName.trim(),
+            lastName: customer.lastName.trim(),
+            email: customer.email.trim().toLowerCase(),
+            phone: customer.phone?.trim(),
+        },
+        items: items.map((item) => ({
+            productCode: item.productCode,
+            startTimeLocal: item.startTimeLocal,
+            endTimeLocal: item.endTimeLocal,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            quantities: item.quantities.map((q) => ({
+                optionLabel: q.optionLabel,   // exact spec field name
+                value: q.value,
+                ...(q.optionPrice !== undefined && {optionPrice: q.optionPrice}),
+            })),
+            extras: (item.extras ?? []).map((e) => ({
+                id: e.id,               // exact spec field name (not extraId)
+                quantity: e.quantity,
+            })),
+            participants: item.participants ?? [],
+        })),
+        fields: fields ?? [],
+        comments: comments?.trim() ?? "",
+        sendNotifications: true,
+        ...(creditCard && {
+            creditCard: {
+                cardToken: creditCard.cardToken,
+                ...(creditCard.cardName && {cardName: creditCard.cardName}),
+            } satisfies CreditCard,
+        }),
+    };
+
+    try {
+        const client = new RezdyClient(c.env);
+        const data = await client.post<{
+            requestStatus?: { success: boolean; error?: string; errorMessage?: string };
+            booking?: {
+                orderNumber: string;
+                status: string;
+                totalAmount: number;
+                totalCurrency: string;
+                totalDue: number;
+            };
+        }>("/bookings", rezdyPayload);
+
+        if (!data?.requestStatus?.success) {
+            const detail =
+                data?.requestStatus?.errorMessage ??
+                data?.requestStatus?.error ??
+                "Unknown error";
+            return c.json({error: "Rezdy rejected the booking.", detail}, 422);
+        }
+
+        const b = data.booking;
+        if (!b?.orderNumber) {
+            return c.json(
+                {error: "Booking created but no order number returned."},
+                500
+            );
+        }
+
+        return c.json({
+            orderNumber: b.orderNumber,
+            status: b.status,
+            totalAmount: b.totalAmount,
+            totalCurrency: b.totalCurrency,
+            totalDue: b.totalDue,
+        });
+    } catch (err) {
+        if (err instanceof RezdyError) {
+            if (err.status === 422) {
+                return c.json(
+                    {
+                        error:
+                            "The selected session is no longer available. Please go back and choose another date.",
+                    },
+                    422
+                );
+            }
+            return c.json(
+                {error: "Failed to create booking.", detail: err.body},
+                toStatusCode(err.status)
+            );
+        }
+        throw err;
+    }
 });
 
 export default booking;
