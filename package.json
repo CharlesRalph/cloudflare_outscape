@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "hono": "^4.4.0",
+    "stripe": "^22.3.2",
     "webflow-api": "^3.3.4"
   },
   "devDependencies": {

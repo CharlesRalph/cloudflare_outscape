@@ -9,6 +9,10 @@ export type Env = {
     RATE_LIMIT_WINDOW_MS: string;
     RATE_LIMIT_MAX_REQUESTS: string;
     WEBFLOW_ROOMS_COLLECTION_ID: string;
+    WEBFLOW_ROOM_FEATURES_COLLECTION_ID: string;
+    STRIPE_PUBLISHABLE_KEY: string;
+    STRIPE_SECRET_KEY: string
+
 };
 
 // Safely cast a runtime number to an Hono-compatible status code.
@@ -22,7 +26,17 @@ export function toStatusCode(
         : 502;
 }
 
-// ─── Rezdy domain types (sourced from OpenAPI spec) ──────────────────────────
+export type PaymentSchedule = {
+    depositAvailable: boolean;
+    requiredPaymentType: "deposit_or_full" | "full";
+    depositAmount: number;
+    balanceAmount: number;
+    balanceDueDate: string;
+    balanceDueDaysBeforeDeparture: number;
+};
+
+
+// Rezdy domain types (sourced from OpenAPI spec)
 
 /**
  * Quantity — maps to a product priceOption.
@@ -115,4 +129,15 @@ export type BookingCreate = {
     resellerReference?: string;
     sendNotifications?: boolean;
     paymentOption?: string;
+};
+
+/**
+ * RezdyPayment — entry in the payments[] array for Own Gateway bookings.
+ * Sent on the CONFIRMED booking to record what was charged externally via Stripe.
+ */
+export type RezdyPayment = {
+    amount: number;      // in dollars (e.g. 470.00) — NOT cents
+    type: "CREDITCARD";
+    label: string;
+    currency: string;
 };

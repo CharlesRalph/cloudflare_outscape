@@ -8,6 +8,8 @@ import availability from "./routes/availability";
 import extras from "./routes/extras";
 import booking from "./routes/booking";
 import rooms from "./routes/rooms";
+import payment from "./routes/payment";
+import confirm from "./routes/confirm";
 import type {Env} from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -29,7 +31,9 @@ app.route("/api/products", products);
 app.route("/api/availability", availability);
 app.route("/api/extras", extras);
 app.route("/api/booking", booking);
+app.route("/api/booking/confirm", confirm);
 app.route("/api/rooms", rooms);
+app.route("/api/payment", payment);
 
 //404 fallthrough
 app.notFound((c) => c.json({error: "Route not found."}, 404));

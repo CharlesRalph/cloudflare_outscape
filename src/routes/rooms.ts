@@ -21,6 +21,7 @@ type RezdyPriceOption = {
 type RezdyProduct = {
     productCode?: string;
     code?: string;
+    seatsAvailable?: number;
     priceOptions?: RezdyPriceOption[];
     [key: string]: unknown;
 };
@@ -45,6 +46,22 @@ type WebflowRoomFieldData = {
     "room-snapshot"?: string | null;
     "best-for"?: string | null;
     views?: string | null;
+    slotcalculation?: number | null;
+    "room-features-2"?: string[];
+    [key: string]: unknown;
+};
+
+type WebflowRoomFeatureFieldData = {
+    name?: string | null;
+    displayname?: string | null;
+    title?: string | null;
+    icon?: WebflowAsset | null;
+    [key: string]: unknown;
+};
+
+type WebflowRoomFeatureItem = {
+    id?: string;
+    fieldData?: WebflowRoomFeatureFieldData;
     [key: string]: unknown;
 };
 
@@ -54,9 +71,14 @@ type WebflowRoomItem = {
     [key: string]: unknown;
 };
 
-type WebflowItemsResponse = {
-    items?: WebflowRoomItem[];
-    [key: string]: unknown;
+// type WebflowItemsResponse = {
+//     items?: WebflowRoomItem[];
+//     [key: string]: unknown;
+// };
+
+type RoomFeature = {
+    name: string;
+    iconUrl: string | null;
 };
 
 type NormalizedCmsRoom = {
@@ -69,6 +91,9 @@ type NormalizedCmsRoom = {
     roomSnapshot: string | null;
     bestFor: string | null;
     views: string | null;
+    slotCalculation: number | null;
+    roomFeatureIds: string[];
+    roomFeatures: RoomFeature[];
 };
 
 function normalizeText(value: string): string {
@@ -90,6 +115,55 @@ function normalizeNullableString(value: unknown): string | null {
     return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+
+function normalizeStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+
+    return value
+        .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+        .map((item) => item.trim());
+}
+
+function getRoomFeatureName(item: WebflowRoomFeatureItem): string | null {
+    const fieldData = item.fieldData;
+
+    return (
+        normalizeNullableString(fieldData?.["feature-name"]) ??
+        normalizeNullableString(fieldData?.name) ??
+        normalizeNullableString(fieldData?.displayname) ??
+        normalizeNullableString(fieldData?.title)
+    );
+}
+
+function getRoomFeatureIconUrl(item: WebflowRoomFeatureItem): string | null {
+    const icon = item.fieldData?.icon;
+
+    return icon && typeof icon === "object"
+        ? normalizeNullableString(icon.url)
+        : null;
+}
+
+function buildRoomFeaturesById(items: WebflowRoomFeatureItem[]): Map<string, RoomFeature> {
+    return new Map(
+        items
+            .map((item): [string, RoomFeature] | null => {
+                if (!item.id) return null;
+
+                const featureName = getRoomFeatureName(item);
+                if (!featureName) return null;
+
+                return [
+                    item.id,
+                    {
+                        name: featureName,
+                        iconUrl: getRoomFeatureIconUrl(item),
+                    },
+                ];
+            })
+            .filter((entry): entry is [string, RoomFeature] => entry !== null)
+    );
+}
+
 function getProductFromResponse(data: RezdyProductResponse): RezdyProduct {
     if (data.product && typeof data.product === "object") {
         return data.product;
@@ -101,6 +175,12 @@ function getProductFromResponse(data: RezdyProductResponse): RezdyProduct {
 function getPriceOptions(product: RezdyProduct): RezdyPriceOption[] {
     return Array.isArray(product.priceOptions) ? product.priceOptions : [];
 }
+
+// function getSeatsAvailable(product: RezdyProduct): number | null {
+//     return typeof product.seatsAvailable === "number"
+//         ? product.seatsAvailable
+//         : null;
+// }
 
 function getPriceOptionProductCode(
     priceOption: RezdyPriceOption,
@@ -135,21 +215,20 @@ function normalizeCmsRoom(item: WebflowRoomItem): NormalizedCmsRoom | null {
         roomSnapshot: normalizeNullableString(fieldData["room-snapshot"]),
         bestFor: normalizeNullableString(fieldData["best-for"]),
         views: normalizeNullableString(fieldData.views),
+        slotCalculation:
+            typeof fieldData.slotcalculation === "number" && Number.isFinite(fieldData.slotcalculation)
+                ? fieldData.slotcalculation
+                : null,
+        roomFeatureIds: normalizeStringArray(fieldData["room-features-2"]),
+        roomFeatures: [],
     };
 }
 
-async function fetchWebflowRooms(env: Env): Promise<NormalizedCmsRoom[]> {
-    const collectionId = env.WEBFLOW_ROOMS_COLLECTION_ID;
-    const token = env.WEBFLOW_API_TOKEN;
 
-    if (!collectionId) {
-        throw new Error("WEBFLOW_ROOMS_COLLECTION_ID is not configured.");
-    }
-
-    if (!token) {
-        throw new Error("WEBFLOW_API_TOKEN is not configured.");
-    }
-
+async function fetchWebflowCollection<T>(
+    collectionId: string,
+    token: string
+): Promise<T[]> {
     const url = `https://api.webflow.com/v2/collections/${collectionId}/items?limit=100`;
 
     const res = await fetch(url, {
@@ -165,13 +244,45 @@ async function fetchWebflowRooms(env: Env): Promise<NormalizedCmsRoom[]> {
         throw new Error(`Webflow API error ${res.status}: ${body}`);
     }
 
-    const data = (await res.json()) as WebflowItemsResponse;
-    const items = Array.isArray(data.items) ? data.items : [];
-
-    return items
-        .map(normalizeCmsRoom)
-        .filter((room): room is NormalizedCmsRoom => room !== null);
+    const data = (await res.json()) as { items?: T[] };
+    return Array.isArray(data.items) ? data.items : [];
 }
+
+async function fetchWebflowRooms(env: Env): Promise<NormalizedCmsRoom[]> {
+    const roomsCollectionId = env.WEBFLOW_ROOMS_COLLECTION_ID;
+    const roomFeaturesCollectionId = env.WEBFLOW_ROOM_FEATURES_COLLECTION_ID;
+    const token = env.WEBFLOW_API_TOKEN;
+
+    if (!roomsCollectionId) {
+        throw new Error("WEBFLOW_ROOMS_COLLECTION_ID is not configured.");
+    }
+
+    if (!roomFeaturesCollectionId) {
+        throw new Error("WEBFLOW_ROOM_FEATURES_COLLECTION_ID is not configured.");
+    }
+
+    if (!token) {
+        throw new Error("WEBFLOW_API_TOKEN is not configured.");
+    }
+
+    const [roomItems, roomFeatureItems] = await Promise.all([
+        fetchWebflowCollection<WebflowRoomItem>(roomsCollectionId, token),
+        fetchWebflowCollection<WebflowRoomFeatureItem>(roomFeaturesCollectionId, token),
+    ]);
+
+    const roomFeaturesById = buildRoomFeaturesById(roomFeatureItems);
+
+    return roomItems
+        .map(normalizeCmsRoom)
+        .filter((room): room is NormalizedCmsRoom => room !== null)
+        .map((room) => ({
+            ...room,
+            roomFeatures: room.roomFeatureIds
+                .map((featureId) => roomFeaturesById.get(featureId))
+                .filter((feature): feature is RoomFeature => feature !== undefined),
+        }));
+}
+
 
 function mergeRoomsForProduct(params: {
     productCode: string;
@@ -188,6 +299,9 @@ function mergeRoomsForProduct(params: {
             const optionProductCode = getPriceOptionProductCode(priceOption, productCode);
             const cmsMatchKey = getCmsRoomMatchKey(optionProductCode, label);
             const cms = cmsRoomsByKey.get(cmsMatchKey) ?? null;
+            const publicCms = cms
+                ? (({roomFeatureIds, ...rest}) => rest)(cms)
+                : null;
 
             return {
                 roomCategory: cms?.roomCategory ?? roomCategory,
@@ -199,7 +313,7 @@ function mergeRoomsForProduct(params: {
                     seatsUsed: priceOption.seatsUsed,
                     productCode: optionProductCode,
                 },
-                cms,
+                cms: publicCms,
                 warnings: cms
                     ? []
                     : [
@@ -211,11 +325,9 @@ function mergeRoomsForProduct(params: {
 
 /**
  * GET /api/rooms
- *
  * Query params:
  *   superiorProductCode * — Rezdy product code for Superior room options
  *   premiumProductCode * — Rezdy product code for Premium room options
- *
  * Combines Rezdy priceOptions with Webflow room CMS information.
  */
 rooms.get("/", async (c) => {

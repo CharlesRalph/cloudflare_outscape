@@ -11,12 +11,13 @@ import type {
     CreditCard,
 } from "../types";
 import {toStatusCode} from "../types";
+import {getPaymentSchedule, parseRezdyLocalDateTime} from "../payment-schedule";
 
 const booking = new Hono<{ Bindings: Env }>();
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+//Helpers
 
-function validateQuantities(quantities: unknown): quantities is Quantity[] {
+export function validateQuantities(quantities: unknown): quantities is Quantity[] {
     if (!Array.isArray(quantities) || quantities.length === 0) return false;
     return quantities.every(
         (q) =>
@@ -29,7 +30,7 @@ function validateQuantities(quantities: unknown): quantities is Quantity[] {
     );
 }
 
-function validateCustomer(customer: unknown): customer is Customer {
+export function validateCustomer(customer: unknown): customer is Customer {
     if (typeof customer !== "object" || customer === null) return false;
     const c = customer as Customer;
     return (
@@ -39,7 +40,7 @@ function validateCustomer(customer: unknown): customer is Customer {
     );
 }
 
-function validateExtras(extras: unknown): extras is Extra[] {
+export function validateExtras(extras: unknown): extras is Extra[] {
     if (!Array.isArray(extras)) return false;
     return extras.every(
         (e) =>
@@ -51,7 +52,7 @@ function validateExtras(extras: unknown): extras is Extra[] {
     );
 }
 
-function validateBookingFields(fields: unknown): fields is BookingField[] {
+export function validateBookingFields(fields: unknown): fields is BookingField[] {
     if (!Array.isArray(fields)) return false;
     return fields.every(
         (f) =>
@@ -62,7 +63,7 @@ function validateBookingFields(fields: unknown): fields is BookingField[] {
     );
 }
 
-function validateParticipants(participants: unknown): participants is Participant[] {
+export function validateParticipants(participants: unknown): participants is Participant[] {
     if (!Array.isArray(participants)) return false;
     return participants.every(
         (p) =>
@@ -72,7 +73,7 @@ function validateParticipants(participants: unknown): participants is Participan
     );
 }
 
-// ─── Route ───────────────────────────────────────────────────────────────────
+//Route
 
 /**
  * POST /api/booking
@@ -114,6 +115,7 @@ booking.post("/", async (c) => {
     }
 
     const {status, customer, items, fields, comments, creditCard} = body;
+    console.log(body);
 
     //Status
     if (status !== "NEW" && status !== "PROCESSING" && status !== "CONFIRMED") {
@@ -138,6 +140,8 @@ booking.post("/", async (c) => {
     if (!Array.isArray(items) || items.length === 0) {
         return c.json({error: "items must be a non-empty array."}, 400);
     }
+
+    let bookingGuestCount = 0;
 
     for (const [i, item] of items.entries()) {
         if (!item.productCode || !/^[A-Z0-9_-]{3,50}$/i.test(item.productCode)) {
@@ -191,6 +195,10 @@ booking.post("/", async (c) => {
             );
         }
 
+        bookingGuestCount += totalGuests;
+
+        console.log("bookingGuestCount", bookingGuestCount, totalGuests);
+
         if (item.extras !== undefined && !validateExtras(item.extras)) {
             return c.json(
                 {
@@ -214,6 +222,21 @@ booking.post("/", async (c) => {
     if (fields !== undefined && !validateBookingFields(fields)) {
         return c.json(
             {error: "fields must be an array of { label, value } objects."},
+            400
+        );
+    }
+
+    const firstItem = items[0];
+    const departureDate =
+        firstItem.startTimeLocal
+            ? parseRezdyLocalDateTime(firstItem.startTimeLocal)
+            : firstItem.startTime
+                ? new Date(firstItem.startTime)
+                : null;
+
+    if (!departureDate || Number.isNaN(departureDate.getTime())) {
+        return c.json(
+            {error: "Could not determine booking departure date."},
             400
         );
     }
@@ -316,12 +339,31 @@ booking.post("/", async (c) => {
             );
         }
 
+        const paymentSchedule = getPaymentSchedule({
+            totalAmount: b.totalAmount,
+            departureDate,
+            guestCount: bookingGuestCount,
+        });
+
+        console.log({
+            orderNumber: b.orderNumber,
+            status: b.status,
+            totalAmount: b.totalAmount,
+            totalCurrency: b.totalCurrency,
+            totalDue: b.totalDue,
+            guestCount: bookingGuestCount,
+            paymentSchedule
+        })
+
+
         return c.json({
             orderNumber: b.orderNumber,
             status: b.status,
             totalAmount: b.totalAmount,
             totalCurrency: b.totalCurrency,
             totalDue: b.totalDue,
+            guestCount: bookingGuestCount,
+            paymentSchedule
         });
     } catch (err) {
         if (err instanceof RezdyError) {
