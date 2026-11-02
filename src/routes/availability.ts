@@ -436,6 +436,142 @@ availability.get("/upcoming", async (c) => {
     }
 });
 
+const CALENDAR_LOOK_BACK_DAYS = 7;
+
+const CALENDAR_TRIP_NIGHTS: Record<ExperienceDuration, number> = {
+    "4day": 3,
+    "5day": 4,
+};
+
+function getCalendarWindow(start: string): {
+    months: string[];
+    firstDate: string;
+    startTimeLocal: string;
+    endTimeLocal: string;
+} | { error: string } {
+    const startWindow = getAvailabilityWindow(start);
+    if ("error" in startWindow) {
+        return {error: startWindow.error.replace("month", "start")};
+    }
+
+    const [year, month] = start.split("-").map(Number);
+    const nextMonth = new Date(year, month, 1);
+
+    return {
+        months: [
+            start,
+            `${nextMonth.getFullYear()}-${pad2(nextMonth.getMonth() + 1)}`,
+        ],
+        firstDate: `${start}-01`,
+        // Rezdy only returns sessions starting in the window, so look back for trips running into it.
+        startTimeLocal: formatDateTimeLocal(new Date(year, month - 1, 1 - CALENDAR_LOOK_BACK_DAYS)),
+        endTimeLocal: formatDateTimeLocal(new Date(year, month + 1, 0), true),
+    };
+}
+
+// Rezdy stores some all-day end times as midnight on the last day and others as midnight after it.
+function getCalendarEndDate(startDate: string, duration: ExperienceDuration): string {
+    const [year, month, day] = startDate.split("-").map(Number);
+    const endDate = new Date(Date.UTC(year, month - 1, day + CALENDAR_TRIP_NIGHTS[duration]));
+
+    return endDate.toISOString().slice(0, 10);
+}
+
+/**
+ * GET /api/availability/calendar
+ *
+ * Query params:
+ *   days * — 4 or 5
+ *   start * — yyyy-MM, the first of the two months to return
+ *
+ * Availability is the same for every departure point, so the Launceston products are used.
+ */
+availability.get("/calendar", async (c) => {
+    const {days, start} = c.req.query();
+
+    if (days !== "4" && days !== "5") {
+        return c.json({error: "days must be 4 or 5."}, 400);
+    }
+
+    if (!start) {
+        return c.json({error: "Missing required param: start."}, 400);
+    }
+
+    const window = getCalendarWindow(start);
+    if ("error" in window) {
+        return c.json({error: window.error}, 400);
+    }
+
+    const duration: ExperienceDuration = days === "4" ? "4day" : "5day";
+    const durationProducts = PRODUCTS.filter((product) => {
+        return product.duration === duration && product.departure === "launceston";
+    });
+
+    const baseParams: Record<string, string> = {
+        startTimeLocal: window.startTimeLocal,
+        endTimeLocal: window.endTimeLocal,
+    };
+
+    try {
+        const client = new RezdyClient(c.env);
+
+        const products = await Promise.all(
+            durationProducts.map((product) => getProductAvailability(client, product, baseParams))
+        );
+
+        const mergedAvailability = mergeProductAvailabilitySessions(products);
+
+        const sessions = (mergedAvailability.sessions ?? []).flatMap((session) => {
+            const startDate = session.startTimeLocal?.slice(0, 10);
+
+            if (!startDate) {
+                return [];
+            }
+
+            const endDate = getCalendarEndDate(startDate, duration);
+
+            if (endDate < window.firstDate) {
+                return [];
+            }
+
+            const productSessions = (session.productSessions ?? []) as Array<{
+                roomGrade: RoomGrade;
+                seatsAvailable: number;
+            }>;
+
+            const roomGradeSeatsAvailable = productSessions.reduce<Record<RoomGrade, number>>(
+                (seats, productSession) => {
+                    seats[productSession.roomGrade] += productSession.seatsAvailable;
+
+                    return seats;
+                },
+                {premium: 0, superior: 0}
+            );
+
+            return [{
+                id: session.id,
+                startDate,
+                endDate,
+                startTimeLocal: session.startTimeLocal,
+                endTimeLocal: session.endTimeLocal,
+                seatsAvailable: getSessionSeatsAvailable(session),
+                roomGradeSeatsAvailable,
+            }];
+        });
+
+        return c.json({months: window.months, sessions});
+    } catch (err) {
+        if (err instanceof RezdyError) {
+            return c.json(
+                {error: "Failed to fetch calendar availability.", detail: err.body},
+                toStatusCode(err.status)
+            );
+        }
+
+        throw err;
+    }
+});
+
 availability.get("/products", async (c) => {
     const {
         productsCode,
